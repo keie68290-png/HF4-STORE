@@ -17,10 +17,12 @@ export default function Admin() {
   const [activePage, setActivePage] = useState("الرئيسية");
 
   const [conversations, setConversations] = useState([]);
+  const [tickets, setTickets] = useState([]);
   const [products, setProducts] = useState([]);
   const [ordersCount, setOrdersCount] = useState(0);
 
   const [selected, setSelected] = useState(null);
+  const [selectedType, setSelectedType] = useState("conversation");
   const [messages, setMessages] = useState([]);
   const [reply, setReply] = useState("");
 
@@ -45,6 +47,20 @@ export default function Admin() {
     setConversations(data || []);
   }
 
+  async function loadTickets() {
+    const { data, error } = await supabase
+      .from("support_tickets")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setTickets(data || []);
+  }
+
   async function loadProducts() {
     const { data, error } = await supabase
       .from("products")
@@ -64,12 +80,9 @@ export default function Admin() {
       .from("orders")
       .select("*", { count: "exact", head: true });
 
-    if (!error) {
-      setOrdersCount(count || 0);
-    }
+    if (!error) setOrdersCount(count || 0);
   }
 
-  // التحقق من صلاحية المدير
   useEffect(() => {
     let active = true;
 
@@ -125,11 +138,7 @@ export default function Admin() {
         }
 
         if (isAdmin !== true) {
-          setError(
-            "الحساب لا يملك صلاحية المدير. " +
-            "الدور: " + profile.role +
-            " | فعال: " + profile.is_active
-          );
+          setError("الحساب لا يملك صلاحية المدير.");
           setChecking(false);
           return;
         }
@@ -138,16 +147,15 @@ export default function Admin() {
 
         await Promise.all([
           loadConversations(),
+          loadTickets(),
           loadProducts(),
           loadOrdersCount()
         ]);
 
-        if (active) {
-          setChecking(false);
-        }
+        if (active) setChecking(false);
       } catch (err) {
         if (active) {
-          setError("حدث خطأ غير متوقع: " + (err.message || String(err)));
+          setError("حدث خطأ: " + (err.message || String(err)));
           setChecking(false);
         }
       }
@@ -161,7 +169,7 @@ export default function Admin() {
   }, []);
 
   function updateProductField(field, value) {
-    setProductForm((previous) => ({
+    setProductForm(previous => ({
       ...previous,
       [field]: value
     }));
@@ -193,7 +201,6 @@ export default function Admin() {
 
   async function saveProduct(e) {
     e.preventDefault();
-
     setError("");
     setSuccess("");
 
@@ -211,10 +218,9 @@ export default function Admin() {
       return;
     }
 
-    const categoryId =
-      productForm.category_id.trim() === ""
-        ? null
-        : Number(productForm.category_id);
+    const categoryId = productForm.category_id.trim() === ""
+      ? null
+      : Number(productForm.category_id);
 
     if (
       categoryId !== null &&
@@ -254,15 +260,12 @@ export default function Admin() {
 
       if (result.error) throw result.error;
 
-      setSuccess(
-        editingProduct
-          ? "تم تعديل المنتج بنجاح!"
-          : "تمت إضافة المنتج بنجاح!"
-      );
+      setSuccess(editingProduct
+        ? "تم تعديل المنتج بنجاح!"
+        : "تمت إضافة المنتج بنجاح!");
 
       setEditingProduct(null);
       setProductForm(emptyProduct);
-
       await loadProducts();
     } catch (err) {
       setError(err.message || "حدث خطأ أثناء حفظ المنتج.");
@@ -272,14 +275,7 @@ export default function Admin() {
   }
 
   async function deleteProduct(product) {
-    const confirmed = window.confirm(
-      `هل أنت متأكد من حذف المنتج "${product.name}"؟`
-    );
-
-    if (!confirmed) return;
-
-    setError("");
-    setSuccess("");
+    if (!window.confirm(`هل أنت متأكد من حذف المنتج "${product.name}"؟`)) return;
 
     const { error } = await supabase
       .from("products")
@@ -291,9 +287,7 @@ export default function Admin() {
       return;
     }
 
-    if (editingProduct?.id === product.id) {
-      cancelEdit();
-    }
+    if (editingProduct?.id === product.id) cancelEdit();
 
     setSuccess("تم حذف المنتج بنجاح.");
     await loadProducts();
@@ -302,9 +296,7 @@ export default function Admin() {
   async function toggleProductAvailability(product) {
     const { error } = await supabase
       .from("products")
-      .update({
-        is_available: !product.is_available
-      })
+      .update({ is_available: !product.is_available })
       .eq("id", product.id);
 
     if (error) {
@@ -316,14 +308,23 @@ export default function Admin() {
     await loadProducts();
   }
 
-  async function openConversation(conversation) {
-    setSelected(conversation);
+  async function openConversation(item, type = "conversation") {
+    setSelected(item);
+    setSelectedType(type);
     setError("");
 
+    const table = type === "ticket"
+      ? "support_messages"
+      : "chat_messages";
+
+    const foreignKey = type === "ticket"
+      ? "ticket_id"
+      : "conversation_id";
+
     const { data, error } = await supabase
-      .from("chat_messages")
+      .from(table)
       .select("*")
-      .eq("conversation_id", conversation.id)
+      .eq(foreignKey, item.id)
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -343,10 +344,18 @@ export default function Admin() {
     setError("");
 
     try {
+      const table = selectedType === "ticket"
+        ? "support_messages"
+        : "chat_messages";
+
+      const foreignKey = selectedType === "ticket"
+        ? "ticket_id"
+        : "conversation_id";
+
       const { error } = await supabase
-        .from("chat_messages")
+        .from(table)
         .insert({
-          conversation_id: selected.id,
+          [foreignKey]: selected.id,
           sender_id: user.id,
           message: reply.trim()
         });
@@ -354,7 +363,7 @@ export default function Admin() {
       if (error) throw error;
 
       setReply("");
-      await openConversation(selected);
+      await openConversation(selected, selectedType);
     } catch (err) {
       setError(err.message || "تعذر إرسال الرد");
     } finally {
@@ -362,11 +371,31 @@ export default function Admin() {
     }
   }
 
+  async function closeTicket(ticket) {
+    if (!window.confirm("هل تريد إغلاق تذكرة الدعم؟")) return;
+
+    const { error } = await supabase
+      .from("support_tickets")
+      .update({ status: "closed" })
+      .eq("id", ticket.id);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setSuccess("تم إغلاق التذكرة.");
+    await loadTickets();
+
+    if (selected?.id === ticket.id && selectedType === "ticket") {
+      setSelected({ ...ticket, status: "closed" });
+    }
+  }
+
   async function logout() {
     await supabase.auth.signOut();
     setUser(null);
     setSelected(null);
-    setConversations([]);
     setMessages([]);
   }
 
@@ -376,6 +405,7 @@ export default function Admin() {
     { name: "الطلبات", icon: "🛒" },
     { name: "الزبائن", icon: "👥" },
     { name: "المحادثات", icon: "💬" },
+    { name: "تذاكر الدعم", icon: "🎧" },
     { name: "الإعدادات", icon: "⚙️" }
   ];
 
@@ -439,26 +469,10 @@ export default function Admin() {
         boxSizing: "border-box"
       }}>
         <h1>HF4 STORE</h1>
-        <h2 style={{ color: "#ff7777" }}>
-          ليس لديك صلاحية للوصول!
-        </h2>
+        <h2 style={{ color: "#ff7777" }}>ليس لديك صلاحية للوصول!</h2>
         <p>هذه الصفحة مخصصة للإدارة فقط.</p>
-
-        {error && (
-          <p style={{
-            color: "#ffaaaa",
-            background: "#4b1d29",
-            padding: "12px",
-            borderRadius: "8px",
-            maxWidth: "500px"
-          }}>
-            {error}
-          </p>
-        )}
-
-        <a href="/" style={{ color: "#66aaff" }}>
-          العودة إلى المتجر
-        </a>
+        {error && <p style={{ color: "#ffaaaa" }}>{error}</p>}
+        <a href="/" style={{ color: "#66aaff" }}>العودة إلى المتجر</a>
       </div>
     );
   }
@@ -476,29 +490,23 @@ export default function Admin() {
         flexDirection: "column",
         minHeight: "100vh"
       }}>
-        <h2 style={{
-          textAlign: "center",
-          color: "#4b9aff",
-          margin: "5px 0 30px"
-        }}>
+        <h2 style={{ textAlign: "center", color: "#4b9aff", margin: "5px 0 30px" }}>
           HF4 STORE
         </h2>
 
-        <p style={{
-          color: "#8293aa",
-          fontSize: "12px",
-          paddingRight: "10px"
-        }}>
+        <p style={{ color: "#8293aa", fontSize: "12px", paddingRight: "10px" }}>
           القائمة الرئيسية
         </p>
 
-        {pages.map((page) => (
+        {pages.map(page => (
           <button
             key={page.name}
             onClick={() => {
               setActivePage(page.name);
               setError("");
               setSuccess("");
+              setSelected(null);
+              setMessages([]);
             }}
             style={{
               width: "100%",
@@ -510,12 +518,8 @@ export default function Admin() {
               margin: "4px 0",
               borderRadius: "9px",
               border: "none",
-              background: activePage === page.name
-                ? "#203b60"
-                : "transparent",
-              color: activePage === page.name
-                ? "#ffffff"
-                : "#aab8ca",
+              background: activePage === page.name ? "#203b60" : "transparent",
+              color: activePage === page.name ? "#ffffff" : "#aab8ca",
               cursor: "pointer",
               fontSize: "15px"
             }}
@@ -529,12 +533,7 @@ export default function Admin() {
 
         <button
           onClick={logout}
-          style={{
-            ...buttonStyle,
-            background: "#8b2635",
-            width: "100%",
-            marginTop: "20px"
-          }}
+          style={{ ...buttonStyle, background: "#8b2635", width: "100%", marginTop: "20px" }}
         >
           تسجيل خروج
         </button>
@@ -555,14 +554,11 @@ export default function Admin() {
           marginBottom: "25px"
         }}>
           <div>
-            <h1 style={{ margin: "0 0 8px" }}>
-              {activePage}
-            </h1>
+            <h1 style={{ margin: "0 0 8px" }}>{activePage}</h1>
             <p style={{ color: "#8293aa", margin: 0 }}>
               أهلاً بك في لوحة إدارة HF4 STORE
             </p>
           </div>
-
           <span style={{
             background: "#123d32",
             color: "#65e6ad",
@@ -610,18 +606,12 @@ export default function Admin() {
                 { title: "المنتجات", value: products.length, icon: "📦" },
                 { title: "الطلبات", value: ordersCount, icon: "🛒" },
                 { title: "المحادثات", value: conversations.length, icon: "💬" },
-                { title: "الزبائن", value: "قريباً", icon: "👥" }
-              ].map((item) => (
+                { title: "تذاكر الدعم", value: tickets.length, icon: "🎧" }
+              ].map(item => (
                 <div key={item.title} style={cardStyle}>
-                  <div style={{ fontSize: "25px" }}>
-                    {item.icon}
-                  </div>
-                  <p style={{ color: "#9aabc1" }}>
-                    {item.title}
-                  </p>
-                  <h2 style={{ margin: 0 }}>
-                    {item.value}
-                  </h2>
+                  <div style={{ fontSize: "25px" }}>{item.icon}</div>
+                  <p style={{ color: "#9aabc1" }}>{item.title}</p>
+                  <h2 style={{ margin: 0 }}>{item.value}</h2>
                 </div>
               ))}
             </div>
@@ -629,12 +619,9 @@ export default function Admin() {
             <div style={cardStyle}>
               <h2>مرحباً بك في لوحة الإدارة</h2>
               <p style={{ color: "#aab8ca" }}>
-                يمكنك إدارة منتجاتك ومتابعة محادثات الزبائن من هنا.
+                يمكنك إدارة منتجاتك ومتابعة محادثات وتذاكر الدعم من هنا.
               </p>
-              <button
-                onClick={() => setActivePage("المنتجات")}
-                style={buttonStyle}
-              >
+              <button onClick={() => setActivePage("المنتجات")} style={buttonStyle}>
                 إدارة المنتجات
               </button>
             </div>
@@ -643,38 +630,23 @@ export default function Admin() {
 
         {activePage === "المنتجات" && (
           <>
-            <div style={{
-              ...cardStyle,
-              marginBottom: "20px"
-            }}>
-              <h2>
-                {editingProduct ? "تعديل المنتج" : "إضافة منتج جديد"}
-              </h2>
+            <div style={{ ...cardStyle, marginBottom: "20px" }}>
+              <h2>{editingProduct ? "تعديل المنتج" : "إضافة منتج جديد"}</h2>
 
               <form onSubmit={saveProduct}>
                 <label>اسم المنتج</label>
                 <input
                   style={inputStyle}
                   value={productForm.name}
-                  onChange={(e) =>
-                    updateProductField("name", e.target.value)
-                  }
-                  placeholder="مثال: PlayStation 5"
+                  onChange={e => updateProductField("name", e.target.value)}
                   required
                 />
 
                 <label>وصف المنتج</label>
                 <textarea
-                  style={{
-                    ...inputStyle,
-                    minHeight: "90px",
-                    resize: "vertical"
-                  }}
+                  style={{ ...inputStyle, minHeight: "90px", resize: "vertical" }}
                   value={productForm.description}
-                  onChange={(e) =>
-                    updateProductField("description", e.target.value)
-                  }
-                  placeholder="اكتب وصف المنتج..."
+                  onChange={e => updateProductField("description", e.target.value)}
                 />
 
                 <label>السعر</label>
@@ -684,10 +656,7 @@ export default function Admin() {
                   min="0"
                   step="0.01"
                   value={productForm.price}
-                  onChange={(e) =>
-                    updateProductField("price", e.target.value)
-                  }
-                  placeholder="مثال: 250"
+                  onChange={e => updateProductField("price", e.target.value)}
                   required
                 />
 
@@ -696,26 +665,8 @@ export default function Admin() {
                   style={inputStyle}
                   type="url"
                   value={productForm.image_url}
-                  onChange={(e) =>
-                    updateProductField("image_url", e.target.value)
-                  }
-                  placeholder="https://example.com/image.jpg"
+                  onChange={e => updateProductField("image_url", e.target.value)}
                 />
-
-                {productForm.image_url && (
-                  <img
-                    src={productForm.image_url}
-                    alt="معاينة المنتج"
-                    style={{
-                      width: "140px",
-                      height: "120px",
-                      objectFit: "contain",
-                      background: "white",
-                      borderRadius: "10px",
-                      marginBottom: "15px"
-                    }}
-                  />
-                )}
 
                 <label>رقم التصنيف (Category ID)</label>
                 <input
@@ -723,10 +674,7 @@ export default function Admin() {
                   type="number"
                   min="1"
                   value={productForm.category_id}
-                  onChange={(e) =>
-                    updateProductField("category_id", e.target.value)
-                  }
-                  placeholder="اتركه فارغاً إذا لم تحدد تصنيفاً"
+                  onChange={e => updateProductField("category_id", e.target.value)}
                 />
 
                 <label style={{
@@ -738,34 +686,20 @@ export default function Admin() {
                   <input
                     type="checkbox"
                     checked={productForm.is_available}
-                    onChange={(e) =>
-                      updateProductField("is_available", e.target.checked)
-                    }
+                    onChange={e => updateProductField("is_available", e.target.checked)}
                   />
                   المنتج متاح للبيع
                 </label>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  style={buttonStyle}
-                >
-                  {loading
-                    ? "جاري الحفظ..."
-                    : editingProduct
-                      ? "حفظ التعديلات"
-                      : "إضافة المنتج"}
+                <button type="submit" disabled={loading} style={buttonStyle}>
+                  {loading ? "جاري الحفظ..." : editingProduct ? "حفظ التعديلات" : "إضافة المنتج"}
                 </button>
 
                 {editingProduct && (
                   <button
                     type="button"
                     onClick={cancelEdit}
-                    style={{
-                      ...buttonStyle,
-                      background: "#475569",
-                      marginRight: "10px"
-                    }}
+                    style={{ ...buttonStyle, background: "#475569", marginRight: "10px" }}
                   >
                     إلغاء التعديل
                   </button>
@@ -774,27 +708,8 @@ export default function Admin() {
             </div>
 
             <div style={cardStyle}>
-              <div style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "10px"
-              }}>
-                <h2>منتجات المتجر ({products.length})</h2>
-                <button
-                  onClick={loadProducts}
-                  style={buttonStyle}
-                >
-                  تحديث المنتجات
-                </button>
-              </div>
-
-              {products.length === 0 && (
-                <p style={{ color: "#9aabc1" }}>
-                  لا توجد منتجات حالياً. أضف أول منتج من النموذج أعلاه.
-                </p>
-              )}
+              <h2>منتجات المتجر ({products.length})</h2>
+              <button onClick={loadProducts} style={buttonStyle}>تحديث المنتجات</button>
 
               <div style={{
                 display: "grid",
@@ -802,17 +717,14 @@ export default function Admin() {
                 gap: "15px",
                 marginTop: "20px"
               }}>
-                {products.map((product) => (
-                  <div
-                    key={product.id}
-                    style={{
-                      background: "#080f1d",
-                      border: "1px solid #263b5c",
-                      borderRadius: "12px",
-                      padding: "13px"
-                    }}
-                  >
-                    {product.image_url ? (
+                {products.map(product => (
+                  <div key={product.id} style={{
+                    background: "#080f1d",
+                    border: "1px solid #263b5c",
+                    borderRadius: "12px",
+                    padding: "13px"
+                  }}>
+                    {product.image_url && (
                       <img
                         src={product.image_url}
                         alt={product.name}
@@ -824,80 +736,26 @@ export default function Admin() {
                           borderRadius: "8px"
                         }}
                       />
-                    ) : (
-                      <div style={{
-                        height: "160px",
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        background: "#182438",
-                        borderRadius: "8px",
-                        fontSize: "45px"
-                      }}>
-                        📦
-                      </div>
                     )}
-
                     <h3>{product.name}</h3>
-
-                    <p style={{ color: "#65a8ff" }}>
-                      السعر: {product.price}
+                    <p style={{ color: "#65a8ff" }}>السعر: {product.price}</p>
+                    <p style={{ color: "#9aabc1" }}>{product.description}</p>
+                    <p style={{ color: product.is_available ? "#65e6ad" : "#ff8888" }}>
+                      {product.is_available ? "متاح للبيع" : "غير متاح"}
                     </p>
-
-                    <p style={{ color: "#9aabc1" }}>
-                      {product.description}
-                    </p>
-
-                    <p style={{
-                      color: product.is_available
-                        ? "#65e6ad"
-                        : "#ff8888"
-                    }}>
-                      {product.is_available
-                        ? "متاح للبيع"
-                        : "غير متاح"}
-                    </p>
-
-                    <div style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: "7px"
-                    }}>
-                      <button
-                        onClick={() => startEditProduct(product)}
-                        style={{
-                          ...buttonStyle,
-                          background: "#2563eb",
-                          flex: 1
-                        }}
-                      >
-                        تعديل
-                      </button>
-
-                      <button
-                        onClick={() => deleteProduct(product)}
-                        style={{
-                          ...buttonStyle,
-                          background: "#a52b3c",
-                          flex: 1
-                        }}
-                      >
-                        حذف
-                      </button>
-
-                      <button
-                        onClick={() => toggleProductAvailability(product)}
-                        style={{
-                          ...buttonStyle,
-                          background: "#475569",
-                          width: "100%"
-                        }}
-                      >
-                        {product.is_available
-                          ? "إخفاء المنتج"
-                          : "إظهار المنتج"}
-                      </button>
-                    </div>
+                    <button onClick={() => startEditProduct(product)} style={buttonStyle}>تعديل</button>
+                    <button
+                      onClick={() => deleteProduct(product)}
+                      style={{ ...buttonStyle, background: "#a52b3c", marginRight: "7px" }}
+                    >
+                      حذف
+                    </button>
+                    <button
+                      onClick={() => toggleProductAvailability(product)}
+                      style={{ ...buttonStyle, background: "#475569", marginTop: "7px", width: "100%" }}
+                    >
+                      {product.is_available ? "إخفاء المنتج" : "إظهار المنتج"}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -907,10 +765,7 @@ export default function Admin() {
 
         {activePage === "المحادثات" && (
           <>
-            <button
-              onClick={loadConversations}
-              style={{ ...buttonStyle, marginBottom: "18px" }}
-            >
+            <button onClick={loadConversations} style={{ ...buttonStyle, marginBottom: "18px" }}>
               تحديث المحادثات
             </button>
 
@@ -920,44 +775,33 @@ export default function Admin() {
               gap: "18px"
             }}>
               <section style={cardStyle}>
-                <h2>محادثات الزبائن</h2>
-
-                {conversations.length === 0 && (
-                  <p>لا توجد محادثات حالياً.</p>
-                )}
-
-                {conversations.map((conversation) => (
+                <h2>محادثات المنتجات</h2>
+                {conversations.map(item => (
                   <button
-                    key={conversation.id}
-                    onClick={() => openConversation(conversation)}
+                    key={item.id}
+                    onClick={() => openConversation(item, "conversation")}
                     style={{
                       display: "block",
                       width: "100%",
                       textAlign: "right",
                       padding: "14px",
                       margin: "8px 0",
-                      background: selected?.id === conversation.id
-                        ? "#203b60"
-                        : "#182438",
+                      background: selected?.id === item.id && selectedType === "conversation" ? "#203b60" : "#182438",
                       color: "white",
                       border: "1px solid #263b5c",
                       borderRadius: "8px",
                       cursor: "pointer"
                     }}
                   >
-                    {conversation.customer_name}
+                    {item.customer_name}
                   </button>
                 ))}
+                {conversations.length === 0 && <p>لا توجد محادثات.</p>}
               </section>
 
               <section style={cardStyle}>
-                <h2>
-                  {selected
-                    ? `محادثة ${selected.customer_name}`
-                    : "اختر محادثة"}
-                </h2>
-
-                {selected && (
+                <h2>{selected && selectedType === "conversation" ? `محادثة ${selected.customer_name}` : "اختر محادثة"}</h2>
+                {selected && selectedType === "conversation" && (
                   <>
                     <div style={{
                       minHeight: "220px",
@@ -967,52 +811,150 @@ export default function Admin() {
                       padding: "12px",
                       borderRadius: "10px"
                     }}>
-                      {messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          style={{
-                            padding: "10px",
-                            margin: "8px 0",
-                            background: msg.sender_id === user.id
-                              ? "#123d70"
-                              : "#253247",
-                            borderRadius: "8px"
-                          }}
-                        >
-                          <small>
-                            {msg.sender_id === user.id
-                              ? "الإدارة"
-                              : "الزبون"}
-                          </small>
+                      {messages.map(msg => (
+                        <div key={msg.id} style={{
+                          padding: "10px",
+                          margin: "8px 0",
+                          background: msg.sender_id === user.id ? "#123d70" : "#253247",
+                          borderRadius: "8px"
+                        }}>
+                          <small>{msg.sender_id === user.id ? "الإدارة" : "الزبون"}</small>
                           <p>{msg.message}</p>
                         </div>
                       ))}
                     </div>
+                    <button onClick={() => openConversation(selected, "conversation")} style={{ ...buttonStyle, margin: "12px 0" }}>
+                      تحديث الرسائل
+                    </button>
+                    <form onSubmit={sendReply}>
+                      <input
+                        value={reply}
+                        onChange={e => setReply(e.target.value)}
+                        placeholder="اكتب ردك..."
+                        required
+                        style={inputStyle}
+                      />
+                      <button type="submit" disabled={loading} style={{ ...buttonStyle, width: "100%" }}>
+                        إرسال الرد
+                      </button>
+                    </form>
+                  </>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+
+        {activePage === "تذاكر الدعم" && (
+          <>
+            <button
+              onClick={loadTickets}
+              style={{ ...buttonStyle, marginBottom: "18px" }}
+            >
+              تحديث التذاكر
+            </button>
+
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "18px"
+            }}>
+              <section style={cardStyle}>
+                <h2>تذاكر الزبائن</h2>
+
+                {tickets.map(ticket => (
+                  <button
+                    key={ticket.id}
+                    onClick={() => openConversation(ticket, "ticket")}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "right",
+                      padding: "14px",
+                      margin: "8px 0",
+                      background: selected?.id === ticket.id && selectedType === "ticket" ? "#203b60" : "#182438",
+                      color: "white",
+                      border: "1px solid #263b5c",
+                      borderRadius: "8px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    <strong>{ticket.customer_name}</strong>
+                    <br />
+                    <small style={{ color: ticket.status === "open" ? "#65e6ad" : "#ff8888" }}>
+                      {ticket.status === "open" ? "مفتوحة" : "مغلقة"}
+                    </small>
+                  </button>
+                ))}
+
+                {tickets.length === 0 && <p>لا توجد تذاكر دعم.</p>}
+              </section>
+
+              <section style={cardStyle}>
+                <h2>
+                  {selected && selectedType === "ticket"
+                    ? `دعم ${selected.customer_name}`
+                    : "اختر تذكرة"}
+                </h2>
+
+                {selected && selectedType === "ticket" && (
+                  <>
+                    <div style={{
+                      minHeight: "220px",
+                      maxHeight: "400px",
+                      overflowY: "auto",
+                      background: "#080f1d",
+                      padding: "12px",
+                      borderRadius: "10px"
+                    }}>
+                      {messages.map(msg => (
+                        <div key={msg.id} style={{
+                          padding: "10px",
+                          margin: "8px 0",
+                          background: msg.sender_id === user.id ? "#123d70" : "#253247",
+                          borderRadius: "8px"
+                        }}>
+                          <small>{msg.sender_id === user.id ? "الإدارة" : "الزبون"}</small>
+                          <p>{msg.message}</p>
+                        </div>
+                      ))}
+                      {messages.length === 0 && <p>لا توجد رسائل بعد.</p>}
+                    </div>
 
                     <button
-                      onClick={() => openConversation(selected)}
+                      onClick={() => openConversation(selected, "ticket")}
                       style={{ ...buttonStyle, margin: "12px 0" }}
                     >
                       تحديث الرسائل
                     </button>
 
-                    <form onSubmit={sendReply}>
-                      <input
-                        value={reply}
-                        onChange={(e) => setReply(e.target.value)}
-                        placeholder="اكتب ردك..."
-                        required
-                        style={inputStyle}
-                      />
+                    {selected.status === "open" && (
+                      <>
+                        <form onSubmit={sendReply}>
+                          <input
+                            value={reply}
+                            onChange={e => setReply(e.target.value)}
+                            placeholder="اكتب ردك للزبون..."
+                            required
+                            style={inputStyle}
+                          />
+                          <button type="submit" disabled={loading} style={{ ...buttonStyle, width: "100%" }}>
+                            إرسال الرد
+                          </button>
+                        </form>
 
-                      <button
-                        type="submit"
-                        disabled={loading}
-                        style={{ ...buttonStyle, width: "100%" }}
-                      >
-                        إرسال الرد
-                      </button>
-                    </form>
+                        <button
+                          onClick={() => closeTicket(selected)}
+                          style={{ ...buttonStyle, background: "#a52b3c", marginTop: "12px", width: "100%" }}
+                        >
+                          إغلاق التذكرة
+                        </button>
+                      </>
+                    )}
+
+                    {selected.status === "closed" && (
+                      <p style={{ color: "#ff8888" }}>هذه التذكرة مغلقة.</p>
+                    )}
                   </>
                 )}
               </section>
@@ -1024,33 +966,21 @@ export default function Admin() {
           <div style={cardStyle}>
             <h2>الطلبات</h2>
             <p>عدد الطلبات المسجلة: {ordersCount}</p>
-            <p style={{ color: "#9aabc1" }}>
-              سنضيف إدارة تفاصيل الطلبات وحالاتها في الخطوة القادمة.
-            </p>
-            <button
-              onClick={loadOrdersCount}
-              style={buttonStyle}
-            >
-              تحديث عدد الطلبات
-            </button>
+            <button onClick={loadOrdersCount} style={buttonStyle}>تحديث عدد الطلبات</button>
           </div>
         )}
 
         {activePage === "الزبائن" && (
           <div style={cardStyle}>
             <h2>الزبائن</h2>
-            <p style={{ color: "#9aabc1" }}>
-              سنضيف قائمة الزبائن وتفاصيل حساباتهم في الخطوة القادمة.
-            </p>
+            <p>سنضيف قائمة الزبائن لاحقاً.</p>
           </div>
         )}
 
         {activePage === "الإعدادات" && (
           <div style={cardStyle}>
             <h2>إعدادات المتجر</h2>
-            <p style={{ color: "#9aabc1" }}>
-              سنضيف إعدادات المتجر في الخطوة القادمة.
-            </p>
+            <p>سنضيف إعدادات المتجر لاحقاً.</p>
           </div>
         )}
       </main>

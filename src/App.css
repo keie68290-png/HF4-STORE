@@ -638,6 +638,87 @@ button {
   text-shadow: 0 0 18px #078cff66;
 }
 
+/* FAQ - الأسئلة الشائعة */
+
+.faq-section {
+  width: 96%;
+  max-width: 1450px;
+  margin: 25px auto;
+  padding: 35px 5%;
+  background:
+    radial-gradient(ellipse at 50% 0%, #102744, transparent 65%),
+    linear-gradient(145deg, #08111c, #03070d);
+  border: 1px solid #1b3d5c;
+  border-radius: 16px;
+  scroll-margin-top: 85px;
+}
+
+.faq-section .section-heading {
+  margin-bottom: 25px;
+}
+
+.faq-container {
+  max-width: 850px;
+  margin: 0 auto;
+}
+
+.faq-item {
+  background: linear-gradient(120deg, #0c1725, #050b13);
+  border: 1px solid #1a3853;
+  border-radius: 12px;
+  margin-bottom: 13px;
+  overflow: hidden;
+  transition: .25s;
+}
+
+.faq-item:hover {
+  border-color: #078cff;
+  box-shadow: 0 0 15px #007bff22;
+}
+
+.faq-item[open] {
+  border-color: #078cff;
+  box-shadow: 0 0 15px #007bff22;
+}
+
+.faq-item summary {
+  position: relative;
+  display: block;
+  padding: 17px 20px 17px 50px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-item summary::after {
+  content: "+";
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #078cff;
+  font-size: 23px;
+  font-weight: 700;
+}
+
+.faq-item[open] summary::after {
+  content: "−";
+}
+
+.faq-item p {
+  margin: 0;
+  padding: 0 20px 18px;
+  color: #aab7c7;
+  font-size: 12px;
+  line-height: 2;
+}
+
 /* ABOUT AND FOOTER */
 
 .about {
@@ -1011,6 +1092,25 @@ footer {
 
   .offer-logo {
     font-size: 27px;
+  }
+
+  .faq-section {
+    width: 94%;
+    padding: 25px 14px;
+  }
+
+  .faq-item summary {
+    font-size: 12px;
+    padding: 15px 13px 15px 40px;
+  }
+
+  .faq-item summary::after {
+    left: 12px;
+  }
+
+  .faq-item p {
+    font-size: 11px;
+    padding: 0 13px 15px;
   }
 }
 
