@@ -189,6 +189,7 @@ export default function Admin() {
 
     setError("");
     setSuccess("");
+
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -199,28 +200,34 @@ export default function Admin() {
     setSuccess("");
   }
 
+  // إضافة منتج أو تعديل منتج موجود
   async function saveProduct(e) {
     e.preventDefault();
+
     setError("");
     setSuccess("");
 
-    if (!productForm.name.trim()) {
+    const productName = String(productForm.name ?? "").trim();
+    const categoryText = String(productForm.category_id ?? "").trim();
+    const priceText = String(productForm.price ?? "").trim();
+
+    if (!productName) {
       setError("اكتب اسم المنتج.");
       return;
     }
 
     if (
-      productForm.price === "" ||
-      !Number.isFinite(Number(productForm.price)) ||
-      Number(productForm.price) < 0
+      priceText === "" ||
+      !Number.isFinite(Number(priceText)) ||
+      Number(priceText) < 0
     ) {
       setError("اكتب سعراً صحيحاً.");
       return;
     }
 
-    const categoryId = productForm.category_id.trim() === ""
+    const categoryId = categoryText === ""
       ? null
-      : Number(productForm.category_id);
+      : Number(categoryText);
 
     if (
       categoryId !== null &&
@@ -231,10 +238,10 @@ export default function Admin() {
     }
 
     const productData = {
-      name: productForm.name.trim(),
-      description: productForm.description.trim(),
-      price: Number(productForm.price),
-      image_url: productForm.image_url.trim(),
+      name: productName,
+      description: String(productForm.description ?? "").trim(),
+      price: Number(priceText),
+      image_url: String(productForm.image_url ?? "").trim(),
       category_id: categoryId,
       is_available: productForm.is_available
     };
@@ -242,70 +249,116 @@ export default function Admin() {
     setLoading(true);
 
     try {
-      let result;
-
       if (editingProduct) {
-        result = await supabase
+        // تعديل المنتج والتأكد من رجوع رقم المنتج المعدّل
+        const { data, error } = await supabase
           .from("products")
           .update(productData)
-          .eq("id", editingProduct.id);
+          .eq("id", editingProduct.id)
+          .select("id");
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+          throw new Error(
+            "لم يتم تعديل المنتج. لم يرجع Supabase أي منتج معدل. تحقق من صلاحيات SELECT وUPDATE وسياسات RLS."
+          );
+        }
+
+        setSuccess("تم تعديل المنتج بنجاح!");
       } else {
-        result = await supabase
+        // إضافة منتج جديد
+        const { error } = await supabase
           .from("products")
           .insert({
             ...productData,
             seller_id: user.id
           });
+
+        if (error) throw error;
+
+        setSuccess("تمت إضافة المنتج بنجاح!");
       }
-
-      if (result.error) throw result.error;
-
-      setSuccess(editingProduct
-        ? "تم تعديل المنتج بنجاح!"
-        : "تمت إضافة المنتج بنجاح!");
 
       setEditingProduct(null);
       setProductForm(emptyProduct);
+
       await loadProducts();
     } catch (err) {
-      setError(err.message || "حدث خطأ أثناء حفظ المنتج.");
+      setError("فشل حفظ المنتج: " + (err.message || "خطأ غير معروف"));
     } finally {
       setLoading(false);
     }
   }
 
+  // حذف المنتج
   async function deleteProduct(product) {
-    if (!window.confirm(`هل أنت متأكد من حذف المنتج "${product.name}"؟`)) return;
-
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("id", product.id);
-
-    if (error) {
-      setError(error.message);
+    if (!window.confirm(`هل أنت متأكد من حذف المنتج "${product.name}"؟`)) {
       return;
     }
 
-    if (editingProduct?.id === product.id) cancelEdit();
+    setError("");
+    setSuccess("");
+    setLoading(true);
 
-    setSuccess("تم حذف المنتج بنجاح.");
-    await loadProducts();
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .delete()
+        .eq("id", product.id)
+        .select("id");
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        throw new Error(
+          "لم يتم حذف المنتج. تحقق من صلاحيات الحذف وسياسات RLS."
+        );
+      }
+
+      if (editingProduct?.id === product.id) {
+        setEditingProduct(null);
+        setProductForm(emptyProduct);
+      }
+
+      setProducts(previous =>
+        previous.filter(item => item.id !== product.id)
+      );
+
+      setSuccess("تم حذف المنتج بنجاح.");
+    } catch (err) {
+      setError("فشل حذف المنتج: " + (err.message || "خطأ غير معروف"));
+    } finally {
+      setLoading(false);
+    }
   }
 
+  // إظهار أو إخفاء المنتج
   async function toggleProductAvailability(product) {
-    const { error } = await supabase
-      .from("products")
-      .update({ is_available: !product.is_available })
-      .eq("id", product.id);
+    setError("");
+    setSuccess("");
+    setLoading(true);
 
-    if (error) {
-      setError(error.message);
-      return;
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .update({ is_available: !product.is_available })
+        .eq("id", product.id)
+        .select("id");
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        throw new Error("لم يتم تحديث حالة المنتج. تحقق من الصلاحيات.");
+      }
+
+      setSuccess("تم تحديث حالة المنتج بنجاح.");
+      await loadProducts();
+    } catch (err) {
+      setError("فشل تحديث حالة المنتج: " + (err.message || "خطأ غير معروف"));
+    } finally {
+      setLoading(false);
     }
-
-    setSuccess("تم تحديث حالة المنتج.");
-    await loadProducts();
   }
 
   async function openConversation(item, type = "conversation") {
@@ -374,21 +427,27 @@ export default function Admin() {
   async function closeTicket(ticket) {
     if (!window.confirm("هل تريد إغلاق تذكرة الدعم؟")) return;
 
-    const { error } = await supabase
-      .from("support_tickets")
-      .update({ status: "closed" })
-      .eq("id", ticket.id);
+    setLoading(true);
+    setError("");
 
-    if (error) {
-      setError(error.message);
-      return;
-    }
+    try {
+      const { error } = await supabase
+        .from("support_tickets")
+        .update({ status: "closed" })
+        .eq("id", ticket.id);
 
-    setSuccess("تم إغلاق التذكرة.");
-    await loadTickets();
+      if (error) throw error;
 
-    if (selected?.id === ticket.id && selectedType === "ticket") {
-      setSelected({ ...ticket, status: "closed" });
+      setSuccess("تم إغلاق التذكرة.");
+      await loadTickets();
+
+      if (selected?.id === ticket.id && selectedType === "ticket") {
+        setSelected({ ...ticket, status: "closed" });
+      }
+    } catch (err) {
+      setError(err.message || "تعذر إغلاق التذكرة.");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -691,7 +750,10 @@ export default function Admin() {
                   المنتج متاح للبيع
                 </label>
 
-                <button type="submit" disabled={loading} style={buttonStyle}>
+                <button type="submit" disabled={loading} style={{
+                  ...buttonStyle,
+                  opacity: loading ? 0.6 : 1
+                }}>
                   {loading ? "جاري الحفظ..." : editingProduct ? "حفظ التعديلات" : "إضافة المنتج"}
                 </button>
 
@@ -699,6 +761,7 @@ export default function Admin() {
                   <button
                     type="button"
                     onClick={cancelEdit}
+                    disabled={loading}
                     style={{ ...buttonStyle, background: "#475569", marginRight: "10px" }}
                   >
                     إلغاء التعديل
@@ -737,27 +800,54 @@ export default function Admin() {
                         }}
                       />
                     )}
+
                     <h3>{product.name}</h3>
                     <p style={{ color: "#65a8ff" }}>السعر: {product.price}</p>
                     <p style={{ color: "#9aabc1" }}>{product.description}</p>
+
                     <p style={{ color: product.is_available ? "#65e6ad" : "#ff8888" }}>
                       {product.is_available ? "متاح للبيع" : "غير متاح"}
                     </p>
-                    <button onClick={() => startEditProduct(product)} style={buttonStyle}>تعديل</button>
+
+                    <button
+                      onClick={() => startEditProduct(product)}
+                      disabled={loading}
+                      style={buttonStyle}
+                    >
+                      تعديل
+                    </button>
+
                     <button
                       onClick={() => deleteProduct(product)}
-                      style={{ ...buttonStyle, background: "#a52b3c", marginRight: "7px" }}
+                      disabled={loading}
+                      style={{
+                        ...buttonStyle,
+                        background: "#a52b3c",
+                        marginRight: "7px",
+                        opacity: loading ? 0.6 : 1
+                      }}
                     >
                       حذف
                     </button>
+
                     <button
                       onClick={() => toggleProductAvailability(product)}
-                      style={{ ...buttonStyle, background: "#475569", marginTop: "7px", width: "100%" }}
+                      disabled={loading}
+                      style={{
+                        ...buttonStyle,
+                        background: "#475569",
+                        marginTop: "7px",
+                        width: "100%"
+                      }}
                     >
                       {product.is_available ? "إخفاء المنتج" : "إظهار المنتج"}
                     </button>
                   </div>
                 ))}
+
+                {products.length === 0 && (
+                  <p style={{ color: "#9aabc1" }}>لا توجد منتجات حالياً.</p>
+                )}
               </div>
             </div>
           </>
@@ -776,6 +866,7 @@ export default function Admin() {
             }}>
               <section style={cardStyle}>
                 <h2>محادثات المنتجات</h2>
+
                 {conversations.map(item => (
                   <button
                     key={item.id}
@@ -796,11 +887,17 @@ export default function Admin() {
                     {item.customer_name}
                   </button>
                 ))}
+
                 {conversations.length === 0 && <p>لا توجد محادثات.</p>}
               </section>
 
               <section style={cardStyle}>
-                <h2>{selected && selectedType === "conversation" ? `محادثة ${selected.customer_name}` : "اختر محادثة"}</h2>
+                <h2>
+                  {selected && selectedType === "conversation"
+                    ? `محادثة ${selected.customer_name}`
+                    : "اختر محادثة"}
+                </h2>
+
                 {selected && selectedType === "conversation" && (
                   <>
                     <div style={{
@@ -823,9 +920,14 @@ export default function Admin() {
                         </div>
                       ))}
                     </div>
-                    <button onClick={() => openConversation(selected, "conversation")} style={{ ...buttonStyle, margin: "12px 0" }}>
+
+                    <button
+                      onClick={() => openConversation(selected, "conversation")}
+                      style={{ ...buttonStyle, margin: "12px 0" }}
+                    >
                       تحديث الرسائل
                     </button>
+
                     <form onSubmit={sendReply}>
                       <input
                         value={reply}
@@ -918,6 +1020,7 @@ export default function Admin() {
                           <p>{msg.message}</p>
                         </div>
                       ))}
+
                       {messages.length === 0 && <p>لا توجد رسائل بعد.</p>}
                     </div>
 
@@ -945,6 +1048,7 @@ export default function Admin() {
 
                         <button
                           onClick={() => closeTicket(selected)}
+                          disabled={loading}
                           style={{ ...buttonStyle, background: "#a52b3c", marginTop: "12px", width: "100%" }}
                         >
                           إغلاق التذكرة
@@ -966,7 +1070,9 @@ export default function Admin() {
           <div style={cardStyle}>
             <h2>الطلبات</h2>
             <p>عدد الطلبات المسجلة: {ordersCount}</p>
-            <button onClick={loadOrdersCount} style={buttonStyle}>تحديث عدد الطلبات</button>
+            <button onClick={loadOrdersCount} style={buttonStyle}>
+              تحديث عدد الطلبات
+            </button>
           </div>
         )}
 
