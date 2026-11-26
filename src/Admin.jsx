@@ -8,7 +8,28 @@ const emptyProduct = {
   price: "",
   image_url: "",
   category_id: "",
-  is_available: true
+  is_available: true,
+  discount_percent: 0
+};
+
+const defaultSettings = {
+  store_name: "HF4 STORE",
+  store_description: "متجرك المفضل للألعاب والحسابات",
+  logo_url: "",
+  discord_url: "https://discord.gg/HF4",
+  contact_text: "",
+  announcement_enabled: false,
+  announcement_text: "",
+  store_enabled: true,
+  closed_message: "المتجر مغلق حالياً، يرجى العودة لاحقاً.",
+  sections: {
+    hero: true,
+    features: true,
+    products: true,
+    offers: true,
+    faq: true,
+    about: true
+  }
 };
 
 export default function Admin() {
@@ -28,6 +49,9 @@ export default function Admin() {
 
   const [productForm, setProductForm] = useState(emptyProduct);
   const [editingProduct, setEditingProduct] = useState(null);
+
+  const [settings, setSettings] = useState(defaultSettings);
+  const [settingsLoading, setSettingsLoading] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -81,6 +105,76 @@ export default function Admin() {
       .select("*", { count: "exact", head: true });
 
     if (!error) setOrdersCount(count || 0);
+  }
+
+  async function loadSettings() {
+    const { data, error } = await supabase
+      .from("store_settings")
+      .select("settings")
+      .eq("id", 1)
+      .maybeSingle();
+
+    if (error) {
+      setError("تعذر تحميل إعدادات المتجر: " + error.message);
+      return;
+    }
+
+    if (data?.settings) {
+      setSettings({
+        ...defaultSettings,
+        ...data.settings,
+        sections: {
+          ...defaultSettings.sections,
+          ...(data.settings.sections || {})
+        }
+      });
+    }
+  }
+
+  function updateSetting(field, value) {
+    setSettings(previous => ({
+      ...previous,
+      [field]: value
+    }));
+  }
+
+  function updateSection(field, value) {
+    setSettings(previous => ({
+      ...previous,
+      sections: {
+        ...previous.sections,
+        [field]: value
+      }
+    }));
+  }
+
+  async function saveSettings(e) {
+    e.preventDefault();
+
+    setError("");
+    setSuccess("");
+    setSettingsLoading(true);
+
+    try {
+      const { error } = await supabase
+        .from("store_settings")
+        .upsert(
+          {
+            id: 1,
+            settings,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: "id" }
+        );
+
+      if (error) throw error;
+
+      setSuccess("تم حفظ إعدادات المتجر بنجاح!");
+    } catch (err) {
+      setError("فشل حفظ الإعدادات: " + (err.message || "خطأ غير معروف"));
+    } finally {
+      setSettingsLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -149,7 +243,8 @@ export default function Admin() {
           loadConversations(),
           loadTickets(),
           loadProducts(),
-          loadOrdersCount()
+          loadOrdersCount(),
+          loadSettings()
         ]);
 
         if (active) setChecking(false);
@@ -184,7 +279,8 @@ export default function Admin() {
       price: product.price ?? "",
       image_url: product.image_url || "",
       category_id: product.category_id ?? "",
-      is_available: product.is_available ?? true
+      is_available: product.is_available ?? true,
+      discount_percent: product.discount_percent ?? 0
     });
 
     setError("");
@@ -200,7 +296,6 @@ export default function Admin() {
     setSuccess("");
   }
 
-  // إضافة منتج أو تعديل منتج موجود
   async function saveProduct(e) {
     e.preventDefault();
 
@@ -225,6 +320,17 @@ export default function Admin() {
       return;
     }
 
+    const discount = Number(productForm.discount_percent);
+
+    if (
+      !Number.isInteger(discount) ||
+      discount < 0 ||
+      discount > 100
+    ) {
+      setError("نسبة الخصم يجب أن تكون رقماً صحيحاً بين 0 و100.");
+      return;
+    }
+
     const categoryId = categoryText === ""
       ? null
       : Number(categoryText);
@@ -243,14 +349,14 @@ export default function Admin() {
       price: Number(priceText),
       image_url: String(productForm.image_url ?? "").trim(),
       category_id: categoryId,
-      is_available: productForm.is_available
+      is_available: productForm.is_available,
+      discount_percent: discount
     };
 
     setLoading(true);
 
     try {
       if (editingProduct) {
-        // تعديل المنتج والتأكد من رجوع رقم المنتج المعدّل
         const { data, error } = await supabase
           .from("products")
           .update(productData)
@@ -261,13 +367,12 @@ export default function Admin() {
 
         if (!data || data.length === 0) {
           throw new Error(
-            "لم يتم تعديل المنتج. لم يرجع Supabase أي منتج معدل. تحقق من صلاحيات SELECT وUPDATE وسياسات RLS."
+            "لم يتم تعديل المنتج. تحقق من صلاحيات SELECT وUPDATE وسياسات RLS."
           );
         }
 
         setSuccess("تم تعديل المنتج بنجاح!");
       } else {
-        // إضافة منتج جديد
         const { error } = await supabase
           .from("products")
           .insert({
@@ -291,7 +396,6 @@ export default function Admin() {
     }
   }
 
-  // حذف المنتج
   async function deleteProduct(product) {
     if (!window.confirm(`هل أنت متأكد من حذف المنتج "${product.name}"؟`)) {
       return;
@@ -311,9 +415,7 @@ export default function Admin() {
       if (error) throw error;
 
       if (!data || data.length === 0) {
-        throw new Error(
-          "لم يتم حذف المنتج. تحقق من صلاحيات الحذف وسياسات RLS."
-        );
+        throw new Error("لم يتم حذف المنتج. تحقق من صلاحيات الحذف وسياسات RLS.");
       }
 
       if (editingProduct?.id === product.id) {
@@ -333,7 +435,6 @@ export default function Admin() {
     }
   }
 
-  // إظهار أو إخفاء المنتج
   async function toggleProductAvailability(product) {
     setError("");
     setSuccess("");
@@ -719,6 +820,54 @@ export default function Admin() {
                   required
                 />
 
+                <label style={{ color: "#168cff", fontWeight: "bold" }}>
+                  🔥 نسبة الخصم (%)
+                </label>
+                <input
+                  style={{
+                    ...inputStyle,
+                    border: "1px solid #168cff"
+                  }}
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={productForm.discount_percent}
+                  onChange={e => updateProductField("discount_percent", e.target.value)}
+                  placeholder="مثلاً 20"
+                />
+                <small style={{
+                  display: "block",
+                  color: "#9aabc1",
+                  marginTop: "-10px",
+                  marginBottom: "15px"
+                }}>
+                  اكتب 20 لخصم 20%، أو 0 لإلغاء العرض.
+                </small>
+
+                {Number(productForm.discount_percent) > 0 &&
+                  Number(productForm.price) >= 0 && (
+                    <div style={{
+                      background: "#102b4b",
+                      border: "1px solid #168cff",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      marginBottom: "15px"
+                    }}>
+                      <strong style={{ color: "#168cff" }}>
+                        معاينة العرض:
+                      </strong>
+                      <p style={{ marginBottom: 0 }}>
+                        السعر الأصلي: ${Number(productForm.price || 0).toFixed(2)}
+                      </p>
+                      <p style={{ color: "#65e6ad", marginBottom: 0 }}>
+                        السعر بعد الخصم: $
+                        {(Number(productForm.price || 0) *
+                          (1 - Number(productForm.discount_percent) / 100)).toFixed(2)}
+                      </p>
+                    </div>
+                  )}
+
                 <label>رابط صورة المنتج</label>
                 <input
                   style={inputStyle}
@@ -802,7 +951,33 @@ export default function Admin() {
                     )}
 
                     <h3>{product.name}</h3>
-                    <p style={{ color: "#65a8ff" }}>السعر: {product.price}</p>
+
+                    {Number(product.discount_percent) > 0 ? (
+                      <div style={{
+                        background: "#102b4b",
+                        border: "1px solid #168cff",
+                        borderRadius: "8px",
+                        padding: "10px",
+                        margin: "10px 0"
+                      }}>
+                        <strong style={{ color: "#168cff" }}>
+                          🔥 عرض {product.discount_percent}%
+                        </strong>
+                        <p style={{ color: "#999", margin: "7px 0" }}>
+                          <del>${Number(product.price).toFixed(2)}</del>
+                        </p>
+                        <strong style={{ color: "#65e6ad" }}>
+                          $
+                          {(Number(product.price) *
+                            (1 - Number(product.discount_percent) / 100)).toFixed(2)}
+                        </strong>
+                      </div>
+                    ) : (
+                      <p style={{ color: "#65a8ff" }}>
+                        السعر: ${Number(product.price).toFixed(2)}
+                      </p>
+                    )}
+
                     <p style={{ color: "#9aabc1" }}>{product.description}</p>
 
                     <p style={{ color: product.is_available ? "#65e6ad" : "#ff8888" }}>
@@ -1084,10 +1259,158 @@ export default function Admin() {
         )}
 
         {activePage === "الإعدادات" && (
-          <div style={cardStyle}>
-            <h2>إعدادات المتجر</h2>
-            <p>سنضيف إعدادات المتجر لاحقاً.</p>
-          </div>
+          <form onSubmit={saveSettings}>
+            <div style={{ ...cardStyle, marginBottom: "18px" }}>
+              <h2>⚙️ إعدادات المتجر العامة</h2>
+              <p style={{ color: "#9aabc1" }}>
+                غيّر معلومات المتجر التي تريد استخدامها في واجهة الموقع.
+              </p>
+
+              <label>اسم المتجر</label>
+              <input
+                style={inputStyle}
+                value={settings.store_name}
+                onChange={e => updateSetting("store_name", e.target.value)}
+                placeholder="HF4 STORE"
+              />
+
+              <label>وصف المتجر</label>
+              <textarea
+                style={{ ...inputStyle, minHeight: "80px" }}
+                value={settings.store_description}
+                onChange={e => updateSetting("store_description", e.target.value)}
+                placeholder="اكتب وصف المتجر..."
+              />
+
+              <label>رابط شعار المتجر</label>
+              <input
+                style={inputStyle}
+                type="url"
+                value={settings.logo_url}
+                onChange={e => updateSetting("logo_url", e.target.value)}
+                placeholder="https://example.com/logo.png"
+              />
+
+              <label>رابط Discord</label>
+              <input
+                style={inputStyle}
+                type="url"
+                value={settings.discord_url}
+                onChange={e => updateSetting("discord_url", e.target.value)}
+                placeholder="https://discord.gg/..."
+              />
+
+              <label>معلومات التواصل</label>
+              <input
+                style={inputStyle}
+                value={settings.contact_text}
+                onChange={e => updateSetting("contact_text", e.target.value)}
+                placeholder="اكتب معلومات التواصل..."
+              />
+            </div>
+
+            <div style={{ ...cardStyle, marginBottom: "18px" }}>
+              <h2>📢 إعلان أعلى الموقع</h2>
+
+              <label style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                margin: "15px 0"
+              }}>
+                <input
+                  type="checkbox"
+                  checked={settings.announcement_enabled}
+                  onChange={e => updateSetting("announcement_enabled", e.target.checked)}
+                />
+                تفعيل الإعلان
+              </label>
+
+              <label>نص الإعلان</label>
+              <textarea
+                style={{ ...inputStyle, minHeight: "80px" }}
+                value={settings.announcement_text}
+                onChange={e => updateSetting("announcement_text", e.target.value)}
+                placeholder="اكتب الإعلان الذي سيظهر للزوار..."
+              />
+            </div>
+
+            <div style={{ ...cardStyle, marginBottom: "18px" }}>
+              <h2>🛍️ حالة المتجر</h2>
+
+              <label style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                margin: "15px 0"
+              }}>
+                <input
+                  type="checkbox"
+                  checked={settings.store_enabled}
+                  onChange={e => updateSetting("store_enabled", e.target.checked)}
+                />
+                المتجر مفتوح ويستقبل الزبائن
+              </label>
+
+              <label>الرسالة التي تظهر عند إغلاق المتجر</label>
+              <textarea
+                style={{ ...inputStyle, minHeight: "80px" }}
+                value={settings.closed_message}
+                onChange={e => updateSetting("closed_message", e.target.value)}
+                placeholder="المتجر مغلق حالياً..."
+              />
+            </div>
+
+            <div style={{ ...cardStyle, marginBottom: "18px" }}>
+              <h2>👁️ إظهار وإخفاء أقسام الموقع</h2>
+              <p style={{ color: "#9aabc1" }}>
+                هذه الخيارات تحفظ حالة الأقسام في قاعدة البيانات.
+              </p>
+
+              {[
+                ["hero", "القسم الرئيسي"],
+                ["features", "قسم المميزات"],
+                ["products", "قسم المنتجات"],
+                ["offers", "قسم العروض"],
+                ["faq", "الأسئلة الشائعة"],
+                ["about", "من نحن"]
+              ].map(([key, label]) => (
+                <label
+                  key={key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "12px",
+                    margin: "7px 0",
+                    background: "#080f1d",
+                    borderRadius: "8px"
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={settings.sections[key]}
+                    onChange={e => updateSection(key, e.target.checked)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+
+            <button
+              type="submit"
+              disabled={settingsLoading}
+              style={{
+                ...buttonStyle,
+                width: "100%",
+                padding: "16px",
+                fontSize: "17px",
+                opacity: settingsLoading ? 0.6 : 1
+              }}
+            >
+              {settingsLoading ? "جاري حفظ الإعدادات..." : "💾 حفظ جميع الإعدادات"}
+            </button>
+          </form>
         )}
       </main>
     </div>
