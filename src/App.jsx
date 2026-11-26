@@ -5,7 +5,6 @@ import Admin from "./Admin";
 
 const DISCORD_URL = "https://discord.gg/HF4";
 
-// حساب السعر بعد الخصم
 function getDiscount(product) {
   const value = Number(product.discount_percent);
   return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
@@ -67,6 +66,19 @@ function AdminGate() {
     <div className="admin-login" dir="rtl">
       <form onSubmit={handleLogin}>
         <h1>HF4 <span>STORE</span></h1>
+
+<p style={{
+  color: "#ffcc66",
+  background: "rgba(255, 193, 7, 0.10)",
+  border: "1px solid rgba(255, 193, 7, 0.45)",
+  borderRadius: "10px",
+  padding: "12px",
+  textAlign: "right",
+  lineHeight: 1.7,
+  margin: "12px 0 18px"
+}}>
+  🔒 الدخول لهذه اللوحة مخصص لصاحب الموقع فقط.
+</p>
         <h3>دخول الإدارة</h3>
         <input type="email" placeholder="البريد الإلكتروني" value={email} onChange={e => setEmail(e.target.value)} required />
         <input type="password" placeholder="كلمة المرور" value={password} onChange={e => setPassword(e.target.value)} required />
@@ -522,7 +534,10 @@ function Store() {
       </section>
 
       <main id="products" className="products-section">
-        <div className="section-heading"><h2>أحدث الحسابات</h2><span>✦</span></div>
+        <div className="section-heading">
+          <h2>منتجات أفضل</h2>
+          <span>✦</span>
+        </div>
 
         <div className="shop-layout">
           <aside className="filter-sidebar">
@@ -569,7 +584,6 @@ function Store() {
         </div>
       </main>
 
-      {/* قسم العروض */}
       <section id="offer" className="products-section" style={{ scrollMarginTop: "100px" }}>
         <div className="section-heading">
           <h2>🔥 العروض والخصومات</h2>
@@ -632,7 +646,6 @@ function Store() {
 
       <footer>© 2026 HF4 STORE - جميع الحقوق محفوظة</footer>
 
-      {/* سلة المشتريات */}
       {cartOpen && (
         <div className="modal-overlay" onClick={() => setCartOpen(false)}>
           <div className="order-modal" onClick={e => e.stopPropagation()}>
@@ -678,7 +691,6 @@ function Store() {
         </div>
       )}
 
-      {/* اختيار طريقة إتمام الطلب */}
       {checkoutOptionsOpen && (
         <div className="modal-overlay" onClick={() => !sending && setCheckoutOptionsOpen(false)}>
           <div className="order-modal" onClick={e => e.stopPropagation()}>
@@ -700,7 +712,6 @@ function Store() {
         </div>
       )}
 
-      {/* محادثة المنتج القديمة */}
       {selectedProduct && (
         <div className="modal-overlay">
           <div className="order-modal">
@@ -736,7 +747,6 @@ function Store() {
         </div>
       )}
 
-      {/* الدعم الفني */}
       {supportOpen && (
         <div className="hf4-support-page" dir="rtl">
           <header className="hf4-support-header">
