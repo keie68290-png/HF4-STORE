@@ -551,6 +551,53 @@ export default function Admin() {
       setLoading(false);
     }
   }
+  async function deleteTicket(ticket) {
+  if (ticket.status !== "closed") {
+    setError("لا يمكن حذف تذكرة مفتوحة.");
+    return;
+  }
+
+  if (!window.confirm("متأكد؟ سيتم حذف التذكرة ورسائلها نهائياً!")) return;
+
+  setLoading(true);
+  setError("");
+  setSuccess("");
+
+  try {
+    const { error: messagesError } = await supabase
+      .from("support_messages")
+      .delete()
+      .eq("ticket_id", ticket.id);
+
+    if (messagesError) throw messagesError;
+
+    const { data, error } = await supabase
+      .from("support_tickets")
+      .delete()
+      .eq("id", ticket.id)
+      .select("id");
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      throw new Error("لم يتم الحذف. تحقق من صلاحيات الحذف.");
+    }
+
+    setTickets(previous => previous.filter(t => t.id !== ticket.id));
+
+    if (selected?.id === ticket.id && selectedType === "ticket") {
+      setSelected(null);
+      setMessages([]);
+      setReply("");
+    }
+
+    setSuccess("تم حذف التذكرة ورسائلها نهائياً.");
+  } catch (err) {
+    setError("فشل الحذف: " + (err.message || "خطأ غير معروف"));
+  } finally {
+    setLoading(false);
+  }
+}
 
   async function logout() {
     await supabase.auth.signOut();
@@ -1123,123 +1170,164 @@ export default function Admin() {
         )}
 
         {activePage === "تذاكر الدعم" && (
-          <>
+  <>
+    <button
+      onClick={loadTickets}
+      style={{ ...buttonStyle, marginBottom: "18px" }}
+    >
+      تحديث التذاكر
+    </button>
+
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+      gap: "18px"
+    }}>
+      <section style={cardStyle}>
+        <h2>تذاكر الزبائن</h2>
+
+        {tickets.map(ticket => (
+          <div
+            key={ticket.id}
+            style={{ display: "flex", gap: "8px", margin: "8px 0" }}
+          >
             <button
-              onClick={loadTickets}
-              style={{ ...buttonStyle, marginBottom: "18px" }}
+              onClick={() => openConversation(ticket, "ticket")}
+              style={{
+                flex: 1,
+                textAlign: "right",
+                padding: "14px",
+                background:
+                  selected?.id === ticket.id && selectedType === "ticket"
+                    ? "#203b60"
+                    : "#182438",
+                color: "white",
+                border: "1px solid #263b5c",
+                borderRadius: "8px",
+                cursor: "pointer"
+              }}
             >
-              تحديث التذاكر
+              <strong>{ticket.customer_name}</strong>
+              <br />
+              <small style={{
+                color: ticket.status === "open" ? "#65e6ad" : "#ff8888"
+              }}>
+                {ticket.status === "open" ? "مفتوحة" : "مغلقة"}
+              </small>
             </button>
 
+            {ticket.status === "closed" && (
+              <button
+                onClick={() => deleteTicket(ticket)}
+                disabled={loading}
+                style={{ ...buttonStyle, background: "#a52b3c" }}
+              >
+                🗑️ حذف
+              </button>
+            )}
+          </div>
+        ))}
+
+        {tickets.length === 0 && <p>لا توجد تذاكر دعم.</p>}
+      </section>
+
+      <section style={cardStyle}>
+        <h2>
+          {selected && selectedType === "ticket"
+            ? `دعم ${selected.customer_name}`
+            : "اختر تذكرة"}
+        </h2>
+
+        {selected && selectedType === "ticket" && (
+          <>
             <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: "18px"
+              minHeight: "220px",
+              maxHeight: "400px",
+              overflowY: "auto",
+              background: "#080f1d",
+              padding: "12px",
+              borderRadius: "10px"
             }}>
-              <section style={cardStyle}>
-                <h2>تذاكر الزبائن</h2>
+              {messages.map(msg => (
+                <div key={msg.id} style={{
+                  padding: "10px",
+                  margin: "8px 0",
+                  background: msg.sender_id === user.id ? "#123d70" : "#253247",
+                  borderRadius: "8px"
+                }}>
+                  <small>
+                    {msg.sender_id === user.id ? "الإدارة" : "الزبون"}
+                  </small>
+                  <p>{msg.message}</p>
+                </div>
+              ))}
 
-                {tickets.map(ticket => (
-                  <button
-                    key={ticket.id}
-                    onClick={() => openConversation(ticket, "ticket")}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "right",
-                      padding: "14px",
-                      margin: "8px 0",
-                      background: selected?.id === ticket.id && selectedType === "ticket" ? "#203b60" : "#182438",
-                      color: "white",
-                      border: "1px solid #263b5c",
-                      borderRadius: "8px",
-                      cursor: "pointer"
-                    }}
-                  >
-                    <strong>{ticket.customer_name}</strong>
-                    <br />
-                    <small style={{ color: ticket.status === "open" ? "#65e6ad" : "#ff8888" }}>
-                      {ticket.status === "open" ? "مفتوحة" : "مغلقة"}
-                    </small>
-                  </button>
-                ))}
-
-                {tickets.length === 0 && <p>لا توجد تذاكر دعم.</p>}
-              </section>
-
-              <section style={cardStyle}>
-                <h2>
-                  {selected && selectedType === "ticket"
-                    ? `دعم ${selected.customer_name}`
-                    : "اختر تذكرة"}
-                </h2>
-
-                {selected && selectedType === "ticket" && (
-                  <>
-                    <div style={{
-                      minHeight: "220px",
-                      maxHeight: "400px",
-                      overflowY: "auto",
-                      background: "#080f1d",
-                      padding: "12px",
-                      borderRadius: "10px"
-                    }}>
-                      {messages.map(msg => (
-                        <div key={msg.id} style={{
-                          padding: "10px",
-                          margin: "8px 0",
-                          background: msg.sender_id === user.id ? "#123d70" : "#253247",
-                          borderRadius: "8px"
-                        }}>
-                          <small>{msg.sender_id === user.id ? "الإدارة" : "الزبون"}</small>
-                          <p>{msg.message}</p>
-                        </div>
-                      ))}
-
-                      {messages.length === 0 && <p>لا توجد رسائل بعد.</p>}
-                    </div>
-
-                    <button
-                      onClick={() => openConversation(selected, "ticket")}
-                      style={{ ...buttonStyle, margin: "12px 0" }}
-                    >
-                      تحديث الرسائل
-                    </button>
-
-                    {selected.status === "open" && (
-                      <>
-                        <form onSubmit={sendReply}>
-                          <input
-                            value={reply}
-                            onChange={e => setReply(e.target.value)}
-                            placeholder="اكتب ردك للزبون..."
-                            required
-                            style={inputStyle}
-                          />
-                          <button type="submit" disabled={loading} style={{ ...buttonStyle, width: "100%" }}>
-                            إرسال الرد
-                          </button>
-                        </form>
-
-                        <button
-                          onClick={() => closeTicket(selected)}
-                          disabled={loading}
-                          style={{ ...buttonStyle, background: "#a52b3c", marginTop: "12px", width: "100%" }}
-                        >
-                          إغلاق التذكرة
-                        </button>
-                      </>
-                    )}
-
-                    {selected.status === "closed" && (
-                      <p style={{ color: "#ff8888" }}>هذه التذكرة مغلقة.</p>
-                    )}
-                  </>
-                )}
-              </section>
+              {messages.length === 0 && <p>لا توجد رسائل بعد.</p>}
             </div>
+
+            <button
+              onClick={() => openConversation(selected, "ticket")}
+              style={{ ...buttonStyle, margin: "12px 0" }}
+            >
+              تحديث الرسائل
+            </button>
+
+            {selected.status === "open" && (
+              <>
+                <form onSubmit={sendReply}>
+                  <input
+                    value={reply}
+                    onChange={e => setReply(e.target.value)}
+                    placeholder="اكتب ردك للزبون..."
+                    required
+                    style={inputStyle}
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    style={{ ...buttonStyle, width: "100%" }}
+                  >
+                    إرسال الرد
+                  </button>
+                </form>
+
+                <button
+                  onClick={() => closeTicket(selected)}
+                  disabled={loading}
+                  style={{
+                    ...buttonStyle,
+                    background: "#a52b3c",
+                    marginTop: "12px",
+                    width: "100%"
+                  }}
+                >
+                  إغلاق التذكرة
+                </button>
+              </>
+            )}
+
+            {selected.status === "closed" && (
+              <>
+                <p style={{ color: "#ff8888" }}>هذه التذكرة مغلقة.</p>
+                <button
+                  onClick={() => deleteTicket(selected)}
+                  disabled={loading}
+                  style={{
+                    ...buttonStyle,
+                    background: "#a52b3c",
+                    width: "100%"
+                  }}
+                >
+                  🗑️ حذف التذكرة نهائياً
+                </button>
+              </>
+            )}
           </>
         )}
+      </section>
+    </div>
+  </>
+)}
 
         {activePage === "الطلبات" && (
           <div style={cardStyle}>
